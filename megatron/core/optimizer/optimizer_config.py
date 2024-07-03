@@ -114,3 +114,9 @@ class OptimizerConfig:
 
     timers: Callable = None
     """Function to get timers."""
+
+    ###############
+    # kernel fusion
+    ###############
+    fuse_dtype_casting: bool = True
+    """If true, fuse dtype casting operations in Adam kernel."""

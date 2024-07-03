@@ -258,6 +258,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         gbuf_ranges: List[Dict],
         param_gbuf_map: Dict[torch.nn.Parameter, Tuple],
         opt_group_ranges: List,
+        fuse_dtype_casting: bool,
     ):
         """
         Create main parameter groups needed for the optimizer step.
@@ -353,6 +354,10 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                 *shard_fp32_params_this_group,
                 *shard_fp32_from_float16_params_this_group,
             ]
+            if fuse_dtype_casting:
+                group_range["orig_group"]["extra_params"] = [
+                    *shard_float16_params_this_group,
+                ]
 
         return (
             model_float16_groups,
@@ -430,6 +435,10 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         self.gbuf_ranges = []
         self.per_bucket_numel = []
         self.per_bucket_numel_unpadded = []
+        self.fuse_dtype_casting = config.fuse_dtype_casting
+        if self.fuse_dtype_casting and not isinstance(optimizer, Adam):
+            raise ValueError("Only Adam optimizer is supported with fuse_dtype_casting=True")
+
         for buffer in self.buffers:
 
             self.per_bucket_numel.append(
@@ -463,7 +472,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
             self.shard_fp32_groups,
             self.shard_fp32_from_float16_groups,
         ) = self._build_model_and_main_param_groups(
-            self.gbuf_ranges, self.model_param_gbuf_map, self.opt_group_ranges
+            self.gbuf_ranges, self.model_param_gbuf_map, self.opt_group_ranges, self.fuse_dtype_casting,
         )
 
         # Now construct data structures to manage all-gather handles.

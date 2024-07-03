@@ -16,6 +16,11 @@ except ImportError:
     from apex.multi_tensor_apply import multi_tensor_applier
     from amp_C import multi_tensor_scale
 
+try:
+    from transformer_engine.pytorch.optimizers import FusedAdam as Adam
+except ImportError:
+    from apex.optimizers import FusedAdam as Adam
+
 from .. import parallel_state, tensor_parallel
 from ..dist_checkpointing.mapping import ShardedStateDict
 from ..dist_checkpointing.optimizer import (
@@ -269,6 +274,9 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
             init_state_fn,
         )
         self.grad_scaler = grad_scaler
+        self.fuse_dtype_casting = config.fuse_dtype_casting
+        if self.fuse_dtype_casting and not isinstance(optimizer, Adam):
+            raise ValueError("Only Adam optimizer is supported with fuse_dtype_casting=True")
 
         # None grad scaler is only supported for bf16.
         if self.grad_scaler is None:
@@ -377,7 +385,10 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
             timers('optimizer-copy-main-to-model-params', log_level=1).start(
                 barrier=self.config.barrier_with_L1_time
             )
-        self._copy_main_params_to_model_params()
+
+        # No need to copy if dtype casting is fused into the optimizer
+        if not self.fuse_dtype_casting:
+            self._copy_main_params_to_model_params()
         if timers is not None:
             timers('optimizer-copy-main-to-model-params').stop()
 
@@ -456,6 +467,8 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
         self.fp32_from_float16_groups = []
         self.fp32_from_fp32_groups = []
 
+        self.fuse_dtype_casting = config.fuse_dtype_casting
+
         # For all the groups in the original optimizer:
         for param_group in self.optimizer.param_groups:
             float16_params_this_group = []
@@ -476,6 +489,8 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
                             main_param.shared = param.shared
                         # Replace the optimizer params with the new fp32 copy.
                         param_group['params'][i] = main_param
+                        if self.fuse_dtype_casting:
+                            param_group['extra_params'] = [*float16_params_this_group]
 
                         fp32_from_float16_params_this_group.append(main_param)
                         # Reset existing state dict key to the new main param.

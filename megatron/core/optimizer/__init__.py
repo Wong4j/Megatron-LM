@@ -186,6 +186,7 @@ def _get_megatron_optimizer_based_on_param_groups(
             weight_decay=config.weight_decay,
             betas=(config.adam_beta1, config.adam_beta2),
             eps=config.adam_eps,
+            fuse_dtype_casting=config.fuse_dtype_casting,
         )
 
         def init_state_fn(opt):
